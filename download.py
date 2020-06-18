@@ -3,6 +3,18 @@ import subprocess
 import logging
 import pandas as pd
 import os
+import threading
+
+num_threading = 0
+event = threading.Event()
+lock = threading.Lock()
+
+def decrease_threading():
+    lock.acquire()
+    global  num_threading
+    num_threading -= 1
+    event.set()
+    lock.release()
 
 def get_logger(log_name, logging_level):
     logger = logging.getLogger(log_name)
@@ -39,6 +51,7 @@ def download_video(num, url, video_id, output_filename,
     if output.returncode != 0:
         message = "{} - {} - {}".format(num, video_id, output.stderr)
         error_download_logger.error(message)
+        decrease_threading()
         return
     success_download_logger.debug("{} - {}".format(num, video_id))
     # 裁剪视频
@@ -55,12 +68,14 @@ def download_video(num, url, video_id, output_filename,
     if output.returncode != 0:
         message = "{} - {} - {}".format(num, video_id, output.stderr)
         error_trim_logger.error(message)
+        decrease_threading()
         return
     success_trim_logger.debug("{} - {}".format(num, video_id))
+    decrease_threading()
 
-def download_videos(labels, video_id_list, url_base, start_time_list, end_time_list):
+def download_videos(labels, video_id_list, url_base, start_time_list, end_time_list, num_start, max_num_threading):
     length = len(video_id_list)
-    for i in range(length):
+    for i in range(num_start, length):
         print("--------------------{}---------------------".format(i))
         url = url_base + video_id_list[i]
         output_filename = "./dataset/{}/{}.mp4".format(labels[i], video_id_list[i])
@@ -68,17 +83,16 @@ def download_videos(labels, video_id_list, url_base, start_time_list, end_time_l
         print("download - {}/{}".format(i, length))
         if not os.path.exists('./dataset/{}'.format(labels[i])):
             os.makedirs('./dataset/{}'.format(labels[i]))
-        download_video(i, url, video_id_list[i], output_filename,
-                       tmp_filename, int(start_time_list[i]), int(end_time_list[i]))
-
-if __name__ == '__main__':
-    data_frame = pd.read_csv(
-        "./data/kinetics-400_train.csv",
-        header=None,
-        sep=","
-    )
-    videos_id_list = data_frame[1].tolist()[1:]
-    labels = data_frame[0].tolist()[1:]
-    start_time_list = data_frame[2].tolist()[1:]
-    end_time_list = data_frame[3].tolist()[1:]
-    download_videos(labels, videos_id_list, "https://www.youtube.com/watch?v=", start_time_list, end_time_list)
+        global num_threading
+        if num_threading >= max_num_threading:
+            event.clear()
+            event.wait()
+        num_threading += 1
+        thread = threading.Thread(target=download_video, args=(i,
+                                                      url,
+                                                      video_id_list[i],
+                                                      output_filename,
+                                                      tmp_filename,
+                                                      int(start_time_list[i]),
+                                                  int(end_time_list[i])))
+        thread.start()
