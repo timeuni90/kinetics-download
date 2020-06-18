@@ -1,7 +1,6 @@
 
 import subprocess
 import logging
-import pandas as pd
 import os
 import threading
 
